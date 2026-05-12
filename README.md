@@ -121,6 +121,20 @@ llm:
 - `cost_rub`;
 - latency.
 
+Главный эксперимент E1 строит графики:
+
+- `fig_tokens_by_context.png` — общий расход токенов по архитектурам;
+- `fig_cost_usd_by_context.png` — стоимость одного задания в USD;
+- `fig_cost_rub_by_context.png` — стоимость одного задания в RUB;
+- `fig_utok_by_context.png` — токенная эффективность;
+- `fig_pass_at_1_by_context.png` — `pass@1` в процентах;
+- `fig_cumulative_errors.png` — накопление ошибок по мере запуска;
+- `fig_context_transfer_tokens.png` — сколько input/context токенов передано в LLM-вызовы;
+- `fig_context_juggling_events.png` — как часто архитектура перекидывает контекст между role/model calls.
+
+На основных графиках по длине контекста красная пунктирная линия показывает
+порог H1 из `experiments.h1_context_threshold_tokens`.
+
 Источник токенов:
 
 1. сначала используется `usage` block из ответа OpenRouter;
@@ -163,6 +177,17 @@ Smoke test без денег и без сети:
 ```powershell
 python -m inot check
 ```
+
+Проверка реального OpenRouter-ключа и баланса перед экспериментами:
+
+```powershell
+python -m inot api-check
+```
+
+Эта команда делает один короткий реальный запрос к `llm.small_model` и
+печатает input/output токены, стоимость в USD и RUB. Если OpenRouter вернёт
+`401/402`, эксперимент нужно не запускать: без валидного ключа и кредитов
+научные метрики будут недостоверны.
 
 H1 на HumanEval:
 

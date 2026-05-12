@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 from typing import Iterable, Sequence
 
+import httpx
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -32,6 +33,7 @@ from rich.progress import (
 from rich.table import Table
 
 from .architectures import BaseAgent
+from .llm import BudgetExceeded
 from .metrics import Summary
 from .types import RunResult, Task
 
@@ -71,6 +73,9 @@ def run_grid(
                     try:
                         r = agent.run(task, seed=seed)
                     except Exception as exc:  # noqa: BLE001
+                        if _is_infrastructure_error(exc):
+                            log.exception("infrastructure error on %s/%s seed=%s", arch_name, task.task_id, seed)
+                            raise
                         log.exception("agent crash on %s/%s seed=%s", arch_name, task.task_id, seed)
                         from .types import VerificationResult
                         r = RunResult(
@@ -82,6 +87,18 @@ def run_grid(
                     results.append(r)
                     pbar.advance(outer)
     return results
+
+
+def _is_infrastructure_error(exc: Exception) -> bool:
+    if isinstance(exc, (BudgetExceeded, httpx.HTTPError)):
+        return True
+    msg = str(exc)
+    return (
+        "OPENROUTER_API_KEY" in msg
+        or "Insufficient credits" in msg
+        or "BudgetExceeded" in msg
+        or "OpenRouter call failed" in msg
+    )
 
 
 # ---------------------------------------------------------------------------

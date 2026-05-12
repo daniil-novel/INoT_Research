@@ -10,6 +10,7 @@ import logging
 import sys
 from pathlib import Path
 
+import httpx
 import typer
 from rich.console import Console
 
@@ -47,6 +48,42 @@ def check(
         r = agent.run(tasks[0], seed=42)
         console.log(f"{arch}: tokens={r.total_tokens} cost=${r.total_cost_usd:.6f} passed={r.passed}")
     console.print("[bold green]Check passed[/bold green]")
+
+
+@app.command(name="api-check")
+def api_check(
+    config: Path = typer.Option(project_root() / "config.yaml", help="Path to config.yaml"),
+):
+    """Tiny real OpenRouter call: verifies key, credits, token usage, USD/RUB accounting."""
+    from .llm import make_client
+
+    cfg = load_config(config)
+    llm = make_client(cfg, dry_run=False)
+    try:
+        try:
+            result = llm.chat(
+                [{"role": "user", "content": "Reply with exactly: OK"}],
+                model=cfg.small_model,
+                role="api_check",
+                architecture="api_check",
+                max_tokens=8,
+            )
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else "?"
+            body = exc.response.text[:300] if exc.response is not None else str(exc)
+            console.print(f"[bold red]OpenRouter API check failed[/bold red]: HTTP {status}")
+            console.print(body)
+            raise typer.Exit(1) from exc
+        console.print("[bold green]OpenRouter API check passed[/bold green]")
+        console.print(
+            f"model={result.usage.model} "
+            f"input={result.usage.input_tokens} "
+            f"output={result.usage.output_tokens} "
+            f"cost=${result.usage.cost_usd:.8f} "
+            f"cost_rub=₽{result.usage.cost_rub:.4f}"
+        )
+    finally:
+        llm.close()
 
 
 @app.command()

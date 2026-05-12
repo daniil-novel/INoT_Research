@@ -23,8 +23,13 @@ Outputs (in ``results/e1/``):
     pairwise_b3_vs_b2.json         — Wilcoxon + bootstrap + Holm-Bonferroni
     table.txt                      — rich table snapshot
     fig_tokens_by_context.png      — bar plot tokens/task per arch×ctx
+    fig_cost_usd_by_context.png    — USD/task curves per arch×ctx
+    fig_cost_rub_by_context.png    — RUB/task curves per arch×ctx
     fig_utok_by_context.png        — line plot U_tok vs context length
-    fig_pass_at_1_by_context.png   — pass@1 by context length
+    fig_pass_at_1_by_context.png   — pass@1 (%) by context length
+    fig_cumulative_errors.png      — cumulative failed runs by architecture
+    fig_context_transfer_tokens.png — mean transmitted input/context tokens
+    fig_context_juggling_events.png — mean role/model handoff count
     H1_VERDICT.md                  — explicit pass/fail of the hypothesis
 """
 from __future__ import annotations
@@ -220,14 +225,49 @@ def run(
         out=out_dir / "fig_tokens_by_context.png",
     )
     _plot_grouped_line(
+        summaries, metric="mean_cost_usd", ylabel="USD / task",
+        title="E1 — Dollar cost vs context length",
+        out=out_dir / "fig_cost_usd_by_context.png",
+        threshold_context=cfg.get("experiments.h1_context_threshold_tokens", 2048),
+    )
+    _plot_grouped_line(
+        summaries, metric="mean_cost_rub", ylabel="RUB / task",
+        title="E1 — Ruble cost vs context length",
+        out=out_dir / "fig_cost_rub_by_context.png",
+        threshold_context=cfg.get("experiments.h1_context_threshold_tokens", 2048),
+    )
+    _plot_grouped_line(
         summaries, metric="utok_per_kilo", ylabel="U_tok = pass@1 / (tokens / 1000)",
         title="E1 — Token efficiency vs context length",
         out=out_dir / "fig_utok_by_context.png",
+        threshold_context=cfg.get("experiments.h1_context_threshold_tokens", 2048),
     )
     _plot_grouped_line(
-        summaries, metric="pass_at_1", ylabel="pass@1",
-        title="E1 — pass@1 vs context length",
+        summaries, metric="pass_at_1", ylabel="pass@1 (%)",
+        title="E1 — pass@1 (%) vs context length",
         out=out_dir / "fig_pass_at_1_by_context.png",
+        threshold_context=cfg.get("experiments.h1_context_threshold_tokens", 2048),
+        value_scale=100.0,
+    )
+    _plot_cumulative_errors(all_results, out=out_dir / "fig_cumulative_errors.png")
+    context_juggling = _context_juggling_summary(all_results)
+    (out_dir / "context_juggling_summary.json").write_text(
+        json.dumps(context_juggling, indent=2), encoding="utf-8")
+    _plot_context_juggling(
+        context_juggling,
+        metric="mean_context_transfer_tokens",
+        ylabel="Mean input/context tokens transmitted per task",
+        title="E1 — Context transfer volume between role/model calls",
+        out=out_dir / "fig_context_transfer_tokens.png",
+        threshold_context=cfg.get("experiments.h1_context_threshold_tokens", 2048),
+    )
+    _plot_context_juggling(
+        context_juggling,
+        metric="mean_handoff_events",
+        ylabel="Mean context handoff events per task",
+        title="E1 — Context juggling frequency",
+        out=out_dir / "fig_context_juggling_events.png",
+        threshold_context=cfg.get("experiments.h1_context_threshold_tokens", 2048),
     )
 
     breakdown = latency_breakdown_by_role(all_results)
@@ -254,7 +294,13 @@ def _load_suite(suite: str, *, n: int, context_target_tokens: int):
     raise ValueError(f"unknown suite: {suite}")
 
 
-def _plot_grouped_bar(summaries: dict, metric: str, ylabel: str, title: str, out: Path) -> None:
+def _plot_grouped_bar(
+    summaries: dict,
+    metric: str,
+    ylabel: str,
+    title: str,
+    out: Path,
+) -> None:
     series = sorted({(k[0], k[1]) for k in summaries.keys()})
     ctxs = sorted({k[2] for k in summaries.keys()})
     fig, ax = plt.subplots(figsize=(9, 5))
@@ -274,19 +320,133 @@ def _plot_grouped_bar(summaries: dict, metric: str, ylabel: str, title: str, out
     plt.close(fig)
 
 
-def _plot_grouped_line(summaries: dict, metric: str, ylabel: str, title: str, out: Path) -> None:
+def _plot_grouped_line(
+    summaries: dict,
+    metric: str,
+    ylabel: str,
+    title: str,
+    out: Path,
+    *,
+    threshold_context: int | None = None,
+    value_scale: float = 1.0,
+) -> None:
     series = sorted({(k[0], k[1]) for k in summaries.keys()})
     ctxs = sorted({k[2] for k in summaries.keys()})
     fig, ax = plt.subplots(figsize=(8, 5))
     for suite_label, arch in series:
-        ys = [summaries[(suite_label, arch, c)][metric] for c in ctxs]
+        ys = [summaries[(suite_label, arch, c)][metric] * value_scale for c in ctxs]
         ax.plot(ctxs, ys, marker="o", label=f"{suite_label}:{arch.split('_', 1)[-1]}")
     ax.set_xscale("log", base=2)
     ax.set_xlabel("Context length |C0| (tokens)")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
+    _add_context_threshold(ax, threshold_context)
     ax.legend(fontsize=8)
     ax.grid(True, which="both", linestyle=":", alpha=0.5)
     fig.tight_layout()
     fig.savefig(out, dpi=140)
     plt.close(fig)
+
+
+def _context_juggling_summary(results: list[RunResult]) -> dict[str, dict]:
+    grouped: dict[tuple[str, str, int], list[RunResult]] = {}
+    for r in results:
+        key = (
+            str(r.extra.get("suite_label", r.task_id.split("/", 1)[0])),
+            r.architecture,
+            int(r.extra.get("context_target_tokens", 0)),
+        )
+        grouped.setdefault(key, []).append(r)
+
+    out: dict[str, dict] = {}
+    for (suite_label, arch, ctx), rows in grouped.items():
+        handoffs = [_handoff_events(r) for r in rows]
+        transfer_tokens = [r.total_input_tokens for r in rows]
+        key = f"{suite_label}::{arch}@ctx{ctx}"
+        out[key] = {
+            "suite": suite_label,
+            "architecture": arch,
+            "context_length": ctx,
+            "n": len(rows),
+            "mean_handoff_events": float(np.mean(handoffs)) if handoffs else 0.0,
+            "mean_context_transfer_tokens": float(np.mean(transfer_tokens)) if transfer_tokens else 0.0,
+            "mean_total_tokens": float(np.mean([r.total_tokens for r in rows])) if rows else 0.0,
+        }
+    return out
+
+
+def _handoff_events(r: RunResult) -> int:
+    """Approximate context juggling count.
+
+    Each LLM call with non-zero input is a context injection. Classical-MAS has
+    multiple role calls, while Hybrid-INoT usually has a single combined call.
+    CTRL has zero.
+    """
+    return sum(1 for u in r.usages if u.input_tokens > 0)
+
+
+def _plot_context_juggling(
+    summary: dict[str, dict],
+    *,
+    metric: str,
+    ylabel: str,
+    title: str,
+    out: Path,
+    threshold_context: int | None = None,
+) -> None:
+    rows = list(summary.values())
+    series = sorted({(r["suite"], r["architecture"]) for r in rows})
+    ctxs = sorted({int(r["context_length"]) for r in rows})
+    by_key = {(r["suite"], r["architecture"], int(r["context_length"])): r for r in rows}
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for suite_label, arch in series:
+        ys = [by_key.get((suite_label, arch, c), {}).get(metric, 0.0) for c in ctxs]
+        ax.plot(ctxs, ys, marker="o", label=f"{suite_label}:{arch.split('_', 1)[-1]}")
+    ax.set_xscale("log", base=2)
+    ax.set_xlabel("Context length |C0| (tokens)")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    _add_context_threshold(ax, threshold_context)
+    ax.legend(fontsize=8)
+    ax.grid(True, which="both", linestyle=":", alpha=0.5)
+    fig.tight_layout()
+    fig.savefig(out, dpi=140)
+    plt.close(fig)
+
+
+def _plot_cumulative_errors(results: list[RunResult], *, out: Path) -> None:
+    grouped: dict[tuple[str, str], list[RunResult]] = {}
+    for r in results:
+        grouped.setdefault((str(r.extra.get("suite_label", "")), r.architecture), []).append(r)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    for (suite_label, arch), rows in sorted(grouped.items()):
+        rows = sorted(rows, key=lambda r: (
+            int(r.extra.get("context_target_tokens", 0)),
+            r.task_id,
+            r.seed,
+        ))
+        cumulative = np.cumsum([0 if r.passed else 1 for r in rows])
+        if len(cumulative):
+            ax.plot(range(1, len(cumulative) + 1), cumulative, label=f"{suite_label}:{arch.split('_', 1)[-1]}")
+    ax.set_xlabel("Run index (sorted by context, task, seed)")
+    ax.set_ylabel("Cumulative errors")
+    ax.set_title("E1 — Cumulative failed runs")
+    ax.legend(fontsize=8)
+    ax.grid(True, linestyle=":", alpha=0.5)
+    fig.tight_layout()
+    fig.savefig(out, dpi=140)
+    plt.close(fig)
+
+
+def _add_context_threshold(ax, threshold_context: int | None) -> None:
+    if threshold_context is None:
+        return
+    ax.axvline(
+        threshold_context,
+        color="red",
+        linestyle="--",
+        linewidth=1.2,
+        alpha=0.85,
+        label=f"H1 threshold |C0|={threshold_context}",
+    )

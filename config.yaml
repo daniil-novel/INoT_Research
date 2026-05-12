@@ -62,6 +62,7 @@ experiments:
   default_seeds: [42, 123, 456, 789, 1337]
   e1_humaneval_n: 164          # full HumanEval; override with --n for pilot
   e1_context_lengths: [512, 2048, 8192]
+  h1_context_threshold_tokens: 2048
   e3_context_lengths: [256, 1024, 4096, 16384]
   e3_humaneval_n: 50
   e4_humaneval_n: 100
