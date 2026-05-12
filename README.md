@@ -6,8 +6,8 @@ Reproducible code for the experimental program of the article
 > ролевой сегрегацией для инженерных задач в условиях длинного общего
 > контекста.** HSE, Moscow, 2026.
 
-The suite implements the four architectures compared in §7 of the article
-(B0 / B1 / B2 / B3) and the five experiments E1–E5, with statistical tests
+The suite implements the control baseline and four assistant architectures
+(CTRL / B0 / B1 / B2 / B3) and the five experiments E1–E5, with statistical tests
 prescribed in §3.2 / §7.1 (Wilcoxon signed-rank, McNemar, 95% bootstrap CI
 with 10⁴ resamples, Holm–Bonferroni FWER correction).
 
@@ -67,6 +67,12 @@ python -m inot e1 --n 20 --seeds "42,123"
 python -m inot view e1
 ```
 
+Run the H1 check on both datasets from the coursework text:
+
+```bash
+python -m inot e1 --n 20 --seeds "42,123" --suite both
+```
+
 Full pipeline (E1..E5, sequential):
 
 ```bash
@@ -84,10 +90,10 @@ the order of **$10–30** at GPT-4o prices for the full suite. Pilot mode
 
 | ID | Hypothesis / quantity | Code | Verdict file |
 |---|---|---|---|
-| H1 | `ΔU_tok ≥ 15%` at `|C0| > 2048`, `pass@1` regression ≤ 2 p.p. | `experiments/e1_humaneval_pilot.py` | `results/e1/H1_VERDICT.md` |
+| H1 | `ΔU_tok ≥ 15%` at long `|C0|`, `pass@1` regression ≤ 2 p.p.; HumanEval plus controlled custom context suite | `experiments/e1_humaneval_pilot.py`, `tasks.build_controlled_context_suite` | `results/e1/H1_VERDICT.md` |
 | τ⋆ | exists and `< 16384` tokens | `experiments/e3_context_scaling.py` | `results/e3/tau_star.json` |
 | H2 | `C^S_check < (ρ0−ρ1) · C^L_rerun` (eq. 16) | `experiments/e4_self_check.py` | `results/e4/H2_VERDICT.md` |
-| H3 | B3 latency advantage vanishes at `p_‖ ≥ 2` | `experiments/e2_ablation.py::_e2c_parallel_tools` | `results/e2/e2c/summary.json` |
+| H3 | B3 latency advantage vanishes at `p_‖ ≥ 2`; measured with serial vs parallel synthetic external tools | `experiments/e2_ablation.py::_e2c_parallel_tools`, `tools.synthetic` | `results/e2/e2c/summary.json` |
 | ablations | each component (compress / critic / self-check) significant | `experiments/e2_ablation.py::_e2a_ablation` | `results/e2/e2a/pairwise_vs_full.json` |
 | TCO | monthly Δcost > 0 at lower CI, robust to ±50% prices | `experiments/e5_tco.py` | `results/e5/tco_summary.json` |
 
@@ -109,11 +115,13 @@ hybrid_inot_research/
     ├── types.py                    Task, TokenUsage, RunResult, VerificationResult
     ├── config.py                   YAML + .env loader
     ├── llm/__init__.py             OpenRouterClient (real) + DryRunClient (mock)
-    ├── tasks/__init__.py           HumanEval, SWE-bench Lite, Synthetic Tool-Use
+    ├── tasks/__init__.py           HumanEval, controlled context, SWE-bench Lite, Synthetic Tool-Use
+    ├── tools/                      deterministic external-tool latency harness for H3
     ├── compression.py              Algorithm 2 surrogate
     ├── verification/__init__.py    sandboxed pytest + lint + sec + maintainability
     ├── architectures/
     │   ├── base.py                 BaseAgent + role-system prompts
+    │   ├── no_assistant.py         CTRL baseline: no LLM, starter scaffold only
     │   ├── single_large.py         B0
     │   ├── self_refine.py          B1 (Madaan et al. 2023)
     │   ├── classical_mas.py        B2 (planner+worker+critic; separate calls)
@@ -140,6 +148,7 @@ Every formula and algorithm of the article has a literal counterpart:
 
 | Article | Code |
 |---|---|
+| Control scenario (без ассистента) | `inot.architectures.NoAssistantAgent` |
 | Definition 1 (Task `(x, C0, Z, V)`) | `inot.types.Task` |
 | Equation (1) (`Θ(\|A\|·\|C0\|) + Θ(\|A\|²ħ)`) | `B2_ClassicalMAS` payload size + role count |
 | Definition 3 (Hybrid-INoT) | `inot.architectures.HybridINoTAgent` |
@@ -160,6 +169,9 @@ Every formula and algorithm of the article has a literal counterpart:
 ## Reproducibility checklist (article §7.1)
 
 - ✅ task IDs fixed (`humaneval.jsonl` cached and read deterministically),
+- ✅ custom controlled-context suite for H1 isolates context length from task difficulty,
+- ✅ control baseline `CTRL_NoAssistant` spends zero tokens and anchors productivity comparisons,
+- ✅ H3 has deterministic serial/parallel tool-latency measurements in addition to LLM traces,
 - ✅ five default seeds `{42, 123, 456, 789, 1337}`,
 - ✅ model snapshot IDs pinned in `config.yaml`,
 - ✅ token prices captured in `config.yaml` with measurement date in the YAML

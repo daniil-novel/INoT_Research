@@ -1,5 +1,6 @@
-"""Four agent architectures compared in the article (§7.2):
+"""Agent architectures compared in the article (§7.2):
 
+* ``NoAssistantAgent`` - CTRL: no LLM calls, starter scaffold only
 * ``SingleLargeAgent``  - B0: one call to the large model, no iteration
 * ``SelfRefineAgent``   - B1: Madaan et al. 2023 in-context self-refine, I=3
 * ``ClassicalMASAgent`` - B2: planner + worker + critic as SEPARATE LLM calls
@@ -16,9 +17,11 @@ from .single_large import SingleLargeAgent
 from .self_refine import SelfRefineAgent
 from .classical_mas import ClassicalMASAgent
 from .hybrid_inot import HybridINoTAgent
+from .no_assistant import NoAssistantAgent
 
 __all__ = [
     "BaseAgent",
+    "NoAssistantAgent",
     "SingleLargeAgent",
     "SelfRefineAgent",
     "ClassicalMASAgent",
@@ -27,6 +30,7 @@ __all__ = [
 ]
 
 _REGISTRY = {
+    "CTRL": NoAssistantAgent,
     "B0": SingleLargeAgent,
     "B1": SelfRefineAgent,
     "B2": ClassicalMASAgent,

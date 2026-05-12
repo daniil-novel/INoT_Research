@@ -164,6 +164,8 @@ class HybridINoTAgent(BaseAgent):
     # ----------------------------------------------------------------------
     def _route_mode(self, task: Task, c_hat: str) -> str:
         """Definition 4: external if (φ_tool ∨ φ_par ∨ |Ĉ|<τ_route)."""
+        if task.metadata.get("force_hybrid_internal", False):
+            return "internal"
         if not self.routing_enabled:
             return "internal"
         phi_tool = 1 if task.metadata.get("requires_tool", False) else 0

@@ -6,10 +6,12 @@ Verifies hypothesis H1:
     not degrade by more than 2 p.p."
 
 Configurations compared:
-    B0 SingleLarge | B1 SelfRefine | B2 ClassicalMAS | B3 HybridINoT
+    CTRL NoAssistant | B0 SingleLarge | B1 SelfRefine | B2 ClassicalMAS | B3 HybridINoT
 
 Each task is run at three context lengths {512, 2048, 8192} (article spec)
-across the chosen seeds. Statistical testing follows §7.1:
+across the chosen seeds. Use ``suite='both'`` to run both HumanEval and the
+controlled custom context benchmark described in the coursework text.
+Statistical testing follows §7.1:
     * paired Wilcoxon signed-rank on per-task U_tok arrays;
     * 95% bootstrap percentile CI (10⁴ resamples) on ΔU_tok;
     * Holm-Bonferroni across the three context-length subgroups;
@@ -54,7 +56,7 @@ from ..runner import (
     save_results,
     summary_table,
 )
-from ..tasks import load_humaneval
+from ..tasks import build_controlled_context_suite, load_humaneval
 from ..types import RunResult
 
 console = Console()
@@ -68,80 +70,96 @@ def run(
     seeds: Sequence[int] = (42, 123),
     out_dir: Path = Path("results/e1"),
     dry_run: bool = False,
+    suite: str = "humaneval",
 ) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     context_lengths = list(cfg.get("experiments.e1_context_lengths", [512, 2048, 8192]))
+    suite_labels = _suite_labels(suite)
 
     llm = make_client(cfg, dry_run=dry_run)
     try:
         all_results: list[RunResult] = []
-        for ctx_len in context_lengths:
-            tasks = load_humaneval(n=n, context_target_tokens=ctx_len, seed=42)
-            agents = {
-                "B0_SingleLarge":   make("B0", llm=llm, config=cfg),
-                "B1_SelfRefine":    make("B1", llm=llm, config=cfg),
-                "B2_ClassicalMAS":  make("B2", llm=llm, config=cfg),
-                "B3_HybridINoT":    make("B3", llm=llm, config=cfg),
-            }
-            console.rule(f"[bold]E1 :: context length = {ctx_len} tokens[/bold]")
-            r = run_grid(agents, tasks, seeds=seeds, progress_label=f"E1 ctx={ctx_len}")
-            for x in r:
-                x.extra["context_target_tokens"] = ctx_len
-            all_results.extend(r)
-            console.log(f"Cumulative spend: ${llm.spent_usd:.4f}")
+        for suite_label in suite_labels:
+            for ctx_len in context_lengths:
+                tasks = _load_suite(suite_label, n=n, context_target_tokens=ctx_len)
+                agents = {
+                    "CTRL_NoAssistant": make("CTRL", llm=llm, config=cfg),
+                    "B0_SingleLarge":   make("B0", llm=llm, config=cfg),
+                    "B1_SelfRefine":    make("B1", llm=llm, config=cfg),
+                    "B2_ClassicalMAS":  make("B2", llm=llm, config=cfg),
+                    "B3_HybridINoT":    make("B3", llm=llm, config=cfg),
+                }
+                console.rule(f"[bold]E1 :: {suite_label} :: context length = {ctx_len} tokens[/bold]")
+                r = run_grid(agents, tasks, seeds=seeds, progress_label=f"E1 {suite_label} ctx={ctx_len}")
+                for x in r:
+                    x.extra["suite_label"] = suite_label
+                    x.extra["context_target_tokens"] = ctx_len
+                all_results.extend(r)
+                console.log(f"Cumulative spend: ${llm.spent_usd:.4f}")
     finally:
         llm.close()
 
     save_results(all_results, out_dir / "runs.json")
 
     # ---------- per-(arch, ctx) summaries -----------------------------------
-    summaries: dict[tuple[str, int], dict] = {}
-    for ctx_len in context_lengths:
-        for arch in ("B0_SingleLarge", "B1_SelfRefine", "B2_ClassicalMAS", "B3_HybridINoT"):
-            subset = [r for r in all_results
-                      if r.architecture == arch and r.extra.get("context_target_tokens") == ctx_len]
-            s = summarize_runs(subset, lam=cfg.get("metrics.lambda_maintainability", 0.5))
-            summaries[(arch, ctx_len)] = s.__dict__
+    summaries: dict[tuple[str, str, int], dict] = {}
+    arch_names = ("CTRL_NoAssistant", "B0_SingleLarge", "B1_SelfRefine", "B2_ClassicalMAS", "B3_HybridINoT")
+    for suite_label in suite_labels:
+        for ctx_len in context_lengths:
+            for arch in arch_names:
+                subset = [r for r in all_results
+                          if r.architecture == arch
+                          and r.extra.get("suite_label") == suite_label
+                          and r.extra.get("context_target_tokens") == ctx_len]
+                s = summarize_runs(subset, lam=cfg.get("metrics.lambda_maintainability", 0.5))
+                summaries[(suite_label, arch, ctx_len)] = s.__dict__
 
     (out_dir / "summary.json").write_text(
-        json.dumps({f"{k[0]}@ctx{k[1]}": v for k, v in summaries.items()}, indent=2, default=str),
+        json.dumps({f"{k[0]}::{k[1]}@ctx{k[2]}": v for k, v in summaries.items()}, indent=2, default=str),
         encoding="utf-8",
     )
 
     # ---------- pairwise B3 vs B2 by ctx + Holm-Bonferroni -----------------
     pairwise: list[dict] = []
     pvals: list[float] = []
-    for ctx_len in context_lengths:
-        b2 = [r for r in all_results
-              if r.architecture == "B2_ClassicalMAS" and r.extra.get("context_target_tokens") == ctx_len]
-        b3 = [r for r in all_results
-              if r.architecture == "B3_HybridINoT" and r.extra.get("context_target_tokens") == ctx_len]
-        # Per-task U_tok: pass / (tokens/1000)  approximated per-task as
-        # 1000 / total_tokens if passed else 0  (so the *mean* per task aligns
-        # with the overall U_tok formula).
-        def _per_task_utok(r: RunResult) -> float:
-            return (1000.0 / r.total_tokens) if (r.passed and r.total_tokens > 0) else 0.0
 
-        a, b = align_pairs(b2, b3, metric_a=_per_task_utok, metric_b=_per_task_utok)
-        cmp = pairwise_compare(b, a, label=f"U_tok B3-B2 @ctx{ctx_len}",
-                               bootstrap_resamples=cfg.get("statistics.bootstrap_resamples", 10000),
-                               ci_level=cfg.get("statistics.ci_level", 0.95))
-        # paired pass/fail
-        pa, pb = align_pairs(b2, b3, metric_a=lambda r: 1 if r.passed else 0,
-                             metric_b=lambda r: 1 if r.passed else 0)
-        chi2, p_mc = mcnemar_paired(pa, pb)
-        pairwise.append({
-            "context_length": ctx_len,
-            "n_pairs": cmp.n,
-            "wilcoxon_stat": cmp.statistic,
-            "wilcoxon_p": cmp.p_value,
-            "diff_mean": cmp.diff_mean,
-            "ci_low": cmp.bootstrap_ci_low,
-            "ci_high": cmp.bootstrap_ci_high,
-            "mcnemar_chi2": chi2,
-            "mcnemar_p_pass1": p_mc,
-        })
-        pvals.append(cmp.p_value)
+    # Per-task U_tok: pass / (tokens/1000)  approximated per-task as
+    # 1000 / total_tokens if passed else 0  (so the *mean* per task aligns
+    # with the overall U_tok formula).
+    def _per_task_utok(r: RunResult) -> float:
+        return (1000.0 / r.total_tokens) if (r.passed and r.total_tokens > 0) else 0.0
+
+    for suite_label in suite_labels:
+        for ctx_len in context_lengths:
+            b2 = [r for r in all_results
+                  if r.architecture == "B2_ClassicalMAS"
+                  and r.extra.get("suite_label") == suite_label
+                  and r.extra.get("context_target_tokens") == ctx_len]
+            b3 = [r for r in all_results
+                  if r.architecture == "B3_HybridINoT"
+                  and r.extra.get("suite_label") == suite_label
+                  and r.extra.get("context_target_tokens") == ctx_len]
+            a, b = align_pairs(b2, b3, metric_a=_per_task_utok, metric_b=_per_task_utok)
+            cmp = pairwise_compare(b, a, label=f"U_tok B3-B2 {suite_label} @ctx{ctx_len}",
+                                   bootstrap_resamples=cfg.get("statistics.bootstrap_resamples", 10000),
+                                   ci_level=cfg.get("statistics.ci_level", 0.95))
+            # paired pass/fail
+            pa, pb = align_pairs(b2, b3, metric_a=lambda r: 1 if r.passed else 0,
+                                 metric_b=lambda r: 1 if r.passed else 0)
+            chi2, p_mc = mcnemar_paired(pa, pb)
+            pairwise.append({
+                "suite": suite_label,
+                "context_length": ctx_len,
+                "n_pairs": cmp.n,
+                "wilcoxon_stat": cmp.statistic,
+                "wilcoxon_p": cmp.p_value,
+                "diff_mean": cmp.diff_mean,
+                "ci_low": cmp.bootstrap_ci_low,
+                "ci_high": cmp.bootstrap_ci_high,
+                "mcnemar_chi2": chi2,
+                "mcnemar_p_pass1": p_mc,
+            })
+            pvals.append(cmp.p_value)
     rejected = holm_bonferroni(pvals, alpha=cfg.get("statistics.alpha", 0.05))
     for d, rej in zip(pairwise, rejected):
         d["holm_bonferroni_rejected"] = bool(rej)
@@ -152,35 +170,42 @@ def run(
     delta = float(cfg.get("experiments.delta_H1", 0.15))
     pp_tol = float(cfg.get("experiments.pass_at_1_tolerance_pp", 2.0)) / 100.0
     long_ctx = max(context_lengths)
-    s_b2 = summaries[("B2_ClassicalMAS", long_ctx)]
-    s_b3 = summaries[("B3_HybridINoT", long_ctx)]
-    rel_utok_gain = (s_b3["utok_per_kilo"] - s_b2["utok_per_kilo"]) / max(1e-12, s_b2["utok_per_kilo"])
-    pass1_drop = s_b2["pass_at_1"] - s_b3["pass_at_1"]
-    pvalue_long = next(d["wilcoxon_p"] for d in pairwise if d["context_length"] == long_ctx)
-    holm_long = next(d["holm_bonferroni_rejected"] for d in pairwise if d["context_length"] == long_ctx)
-    h1_verdict = (
-        "CONFIRMED"
-        if (rel_utok_gain >= delta and pass1_drop <= pp_tol and holm_long)
-        else "NOT CONFIRMED"
-    )
-
-    verdict_md = (
-        f"# H1 Verdict (E1, context={long_ctx} tokens)\n\n"
-        f"- ΔU_tok (B3-B2) / B2 = **{rel_utok_gain*100:+.2f}%**  (threshold δ_H1 = {delta*100:.0f}%)\n"
-        f"- pass@1 drop (B2-B3) = **{pass1_drop*100:+.2f} p.p.**  (tolerance ≤ {pp_tol*100:.0f} p.p.)\n"
-        f"- Wilcoxon p (per-task U_tok B3 vs B2) = **{pvalue_long:.4g}**\n"
-        f"- Holm-Bonferroni rejection at α=0.05: **{holm_long}**\n\n"
-        f"## Decision\n\n**H1: {h1_verdict}**\n"
-    )
+    verdicts = {}
+    verdict_md = f"# H1 Verdict (E1, context={long_ctx} tokens)\n\n"
+    for suite_label in suite_labels:
+        s_b2 = summaries[(suite_label, "B2_ClassicalMAS", long_ctx)]
+        s_b3 = summaries[(suite_label, "B3_HybridINoT", long_ctx)]
+        rel_utok_gain = (s_b3["utok_per_kilo"] - s_b2["utok_per_kilo"]) / max(1e-12, s_b2["utok_per_kilo"])
+        pass1_drop = s_b2["pass_at_1"] - s_b3["pass_at_1"]
+        pvalue_long = next(d["wilcoxon_p"] for d in pairwise
+                           if d["suite"] == suite_label and d["context_length"] == long_ctx)
+        holm_long = next(d["holm_bonferroni_rejected"] for d in pairwise
+                         if d["suite"] == suite_label and d["context_length"] == long_ctx)
+        verdict = (
+            "CONFIRMED"
+            if (rel_utok_gain >= delta and pass1_drop <= pp_tol and holm_long)
+            else "NOT CONFIRMED"
+        )
+        verdicts[suite_label] = verdict
+        verdict_md += (
+            f"## {suite_label}\n\n"
+            f"- ΔU_tok (B3-B2) / B2 = **{rel_utok_gain*100:+.2f}%**  (threshold δ_H1 = {delta*100:.0f}%)\n"
+            f"- pass@1 drop (B2-B3) = **{pass1_drop*100:+.2f} p.p.**  (tolerance ≤ {pp_tol*100:.0f} p.p.)\n"
+            f"- Wilcoxon p (per-task U_tok B3 vs B2) = **{pvalue_long:.4g}**\n"
+            f"- Holm-Bonferroni rejection at α=0.05: **{holm_long}**\n"
+            f"- Decision: **H1 {verdict}**\n\n"
+        )
+    h1_verdict = "CONFIRMED" if all(v == "CONFIRMED" for v in verdicts.values()) else "NOT CONFIRMED"
+    verdict_md += f"## Overall Decision\n\n**H1: {h1_verdict}**\n"
     (out_dir / "H1_VERDICT.md").write_text(verdict_md, encoding="utf-8")
     console.print(verdict_md)
 
     # ---------- pretty summary table --------------------------------------
     flat_summaries = []
-    for (arch, ctx_len), s_dict in summaries.items():
+    for (suite_label, arch, ctx_len), s_dict in summaries.items():
         from ..metrics import Summary
         s = Summary(**s_dict)
-        s.architecture = f"{arch}@ctx{ctx_len}"
+        s.architecture = f"{suite_label}:{arch}@ctx{ctx_len}"
         flat_summaries.append(s)
     table = summary_table(flat_summaries, title="E1 — per-architecture × context")
     console.print(table)
@@ -213,16 +238,32 @@ def run(
 
 
 # ---------------------------------------------------------------------------
+def _suite_labels(suite: str) -> list[str]:
+    if suite == "both":
+        return ["humaneval", "controlled"]
+    if suite in {"humaneval", "controlled"}:
+        return [suite]
+    raise ValueError("suite must be one of: humaneval, controlled, both")
+
+
+def _load_suite(suite: str, *, n: int, context_target_tokens: int):
+    if suite == "humaneval":
+        return load_humaneval(n=n, context_target_tokens=context_target_tokens, seed=42)
+    if suite == "controlled":
+        return build_controlled_context_suite(n=n, context_target_tokens=context_target_tokens, seed=42)
+    raise ValueError(f"unknown suite: {suite}")
+
+
 def _plot_grouped_bar(summaries: dict, metric: str, ylabel: str, title: str, out: Path) -> None:
-    archs = sorted({k[0] for k in summaries.keys()})
-    ctxs = sorted({k[1] for k in summaries.keys()})
+    series = sorted({(k[0], k[1]) for k in summaries.keys()})
+    ctxs = sorted({k[2] for k in summaries.keys()})
     fig, ax = plt.subplots(figsize=(9, 5))
-    bar_w = 0.18
+    bar_w = min(0.16, 0.75 / max(1, len(series)))
     x = np.arange(len(ctxs))
-    for i, arch in enumerate(archs):
-        vals = [summaries[(arch, c)][metric] for c in ctxs]
-        ax.bar(x + i * bar_w, vals, width=bar_w, label=arch.split("_", 1)[-1])
-    ax.set_xticks(x + bar_w * (len(archs) - 1) / 2)
+    for i, (suite_label, arch) in enumerate(series):
+        vals = [summaries[(suite_label, arch, c)][metric] for c in ctxs]
+        ax.bar(x + i * bar_w, vals, width=bar_w, label=f"{suite_label}:{arch.split('_', 1)[-1]}")
+    ax.set_xticks(x + bar_w * (len(series) - 1) / 2)
     ax.set_xticklabels([f"|C0|≈{c}" for c in ctxs])
     ax.set_ylabel(ylabel)
     ax.set_title(title)
@@ -234,12 +275,12 @@ def _plot_grouped_bar(summaries: dict, metric: str, ylabel: str, title: str, out
 
 
 def _plot_grouped_line(summaries: dict, metric: str, ylabel: str, title: str, out: Path) -> None:
-    archs = sorted({k[0] for k in summaries.keys()})
-    ctxs = sorted({k[1] for k in summaries.keys()})
+    series = sorted({(k[0], k[1]) for k in summaries.keys()})
+    ctxs = sorted({k[2] for k in summaries.keys()})
     fig, ax = plt.subplots(figsize=(8, 5))
-    for arch in archs:
-        ys = [summaries[(arch, c)][metric] for c in ctxs]
-        ax.plot(ctxs, ys, marker="o", label=arch.split("_", 1)[-1])
+    for suite_label, arch in series:
+        ys = [summaries[(suite_label, arch, c)][metric] for c in ctxs]
+        ax.plot(ctxs, ys, marker="o", label=f"{suite_label}:{arch.split('_', 1)[-1]}")
     ax.set_xscale("log", base=2)
     ax.set_xlabel("Context length |C0| (tokens)")
     ax.set_ylabel(ylabel)

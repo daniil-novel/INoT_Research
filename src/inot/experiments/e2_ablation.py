@@ -44,6 +44,7 @@ from ..metrics import (
 )
 from ..runner import align_pairs, run_grid, save_results, summary_table
 from ..tasks import build_synthetic_tool_use_suite, load_humaneval
+from ..tools.synthetic import measure_synthetic_tool_latency, summarize_tool_latency
 
 console = Console()
 
@@ -162,6 +163,13 @@ def _e2b_critic_error(cfg, llm, *, n, seeds, out_dir: Path) -> dict:
 def _e2c_parallel_tools(cfg, llm, *, n, seeds, out_dir: Path) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     tasks = build_synthetic_tool_use_suite(n=n, seed=42)
+    serial_tools = measure_synthetic_tool_latency(tasks, mode="serial")
+    parallel_tools = measure_synthetic_tool_latency(tasks, mode="parallel")
+    (out_dir / "tool_latency_serial.json").write_text(
+        json.dumps([r.to_dict() for r in serial_tools], indent=2), encoding="utf-8")
+    (out_dir / "tool_latency_parallel.json").write_text(
+        json.dumps([r.to_dict() for r in parallel_tools], indent=2), encoding="utf-8")
+
     agents = {
         "B2_ClassicalMAS": make("B2", llm=llm, config=cfg),
         "B3_HybridINoT":   make("B3", llm=llm, config=cfg),
@@ -177,7 +185,12 @@ def _e2c_parallel_tools(cfg, llm, *, n, seeds, out_dir: Path) -> dict:
     cmp = pairwise_compare(b, a, label="latency B3-B2",
                            bootstrap_resamples=cfg.get("statistics.bootstrap_resamples", 10000))
     rel_slowdown = (np.mean(b) - np.mean(a)) / max(1e-9, np.mean(a))
-    h3_supported = bool(rel_slowdown >= 0)  # B3 slower => H3 confirmed
+    tool_serial = summarize_tool_latency(serial_tools)
+    tool_parallel = summarize_tool_latency(parallel_tools)
+    tool_slowdown = (
+        tool_serial["mean_measured_latency_ms"] - tool_parallel["mean_measured_latency_ms"]
+    ) / max(1e-9, tool_parallel["mean_measured_latency_ms"])
+    h3_supported = bool(tool_slowdown > 0)  # serial Hybrid-style tools slower than parallel MAS tools
     out = {
         "n_pairs": cmp.n,
         "b2_mean_latency_s": float(np.mean(a)),
@@ -185,7 +198,10 @@ def _e2c_parallel_tools(cfg, llm, *, n, seeds, out_dir: Path) -> dict:
         "relative_slowdown_b3_over_b2": float(rel_slowdown),
         "wilcoxon_p": cmp.p_value,
         "ci_diff_b3_minus_b2": [cmp.bootstrap_ci_low, cmp.bootstrap_ci_high],
-        "h3_supported_b3_not_faster": h3_supported,
+        "tool_serial_summary": tool_serial,
+        "tool_parallel_summary": tool_parallel,
+        "tool_relative_slowdown_serial_over_parallel": float(tool_slowdown),
+        "h3_supported_parallel_tools_hurt_serial_hybrid": h3_supported,
         "acceptable_30pct_band": bool(rel_slowdown <= 0.30),
     }
     (out_dir / "summary.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")

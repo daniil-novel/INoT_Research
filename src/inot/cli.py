@@ -53,13 +53,14 @@ def check(
 def e1(
     n: int = typer.Option(20, help="Number of HumanEval tasks (article default 164)"),
     seeds: str = typer.Option("42,123", help="Comma-separated seeds"),
+    suite: str = typer.Option("humaneval", help="humaneval | controlled | both"),
     config: Path = typer.Option(project_root() / "config.yaml"),
     output: Path = typer.Option(project_root() / "results" / "e1"),
     dry_run: bool = typer.Option(False, help="Use DryRunClient (no API spending)"),
 ):
     """E1 — Pilot on HumanEval (verifies H1, §7.2)."""
     from .experiments.e1_humaneval_pilot import run as _run
-    _run(load_config(config), n=n, seeds=_parse_seeds(seeds), out_dir=output, dry_run=dry_run)
+    _run(load_config(config), n=n, seeds=_parse_seeds(seeds), out_dir=output, dry_run=dry_run, suite=suite)
 
 
 @app.command()

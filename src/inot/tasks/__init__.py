@@ -3,6 +3,7 @@
 Public functions:
     load_humaneval(n=None, contexts=...)  -> list[Task]
     load_swebench_lite(n=None)            -> list[Task]    (optional, requires HF auth)
+    build_controlled_context_suite(...)   -> list[Task]    (custom H1 contexts)
     build_synthetic_tool_use_suite(n=50)  -> list[Task]    (procedural; described in §3.2)
 
 The HumanEval loader supports the article's "context inflation" trick from E1
@@ -156,6 +157,132 @@ def _build_synthetic_context(pool: list[dict], target_tokens: int, rng: random.R
 
 
 # ---------------------------------------------------------------------------
+# Controlled Context Suite (custom H1 benchmark)
+# ---------------------------------------------------------------------------
+def build_controlled_context_suite(
+    n: int = 50,
+    *,
+    context_target_tokens: int = 2048,
+    seed: int = 42,
+) -> list[Task]:
+    """Build deterministic Python tasks with controlled irrelevant context.
+
+    HumanEval is realistic but not perfectly controlled: different tasks carry
+    different prompt lengths and hidden difficulty. This suite isolates the H1
+    variable by holding task families fixed while scaling only ``|C0|``.
+    Context blocks are decoys and API notes that never contain the target
+    solution, so compression/token effects can be tested without leakage.
+    """
+    rng = random.Random(seed)
+    templates = [_controlled_reverse_words, _controlled_count_peaks, _controlled_normalize_path]
+    tasks: list[Task] = []
+    for i in range(n):
+        task = templates[i % len(templates)](i, rng)
+        ctx = _controlled_context(task.entry_point, context_target_tokens, rng)
+        task.context = ctx
+        task.task_id = f"{task.task_id.rsplit('@ctx', 1)[0]}@ctx{context_target_tokens}"
+        task.metadata.update({
+            "context_target_tokens": context_target_tokens,
+            "context_actual_tokens": count_tokens(ctx),
+            "controlled_family": task.metadata.get("family", ""),
+        })
+        tasks.append(task)
+    return tasks
+
+
+def _controlled_reverse_words(i: int, rng: random.Random) -> Task:
+    entry = f"solve_reverse_words_{i}"
+    return Task(
+        task_id=f"controlled/reverse_words/{i}@ctx0",
+        prompt=(
+            f"Implement `{entry}(text: str) -> str`. Split the input on whitespace, "
+            "reverse every word individually, and join the words back with a single space."
+        ),
+        context="",
+        test_code=(
+            "def check(candidate):\n"
+            "    assert candidate('abc de') == 'cba ed'\n"
+            "    assert candidate('  one   two ') == 'eno owt'\n"
+            "    assert candidate('') == ''\n"
+        ),
+        entry_point=entry,
+        suite="controlled_context",
+        metadata={"family": "reverse_words", "difficulty_seed": rng.randint(0, 10_000)},
+    )
+
+
+def _controlled_count_peaks(i: int, rng: random.Random) -> Task:
+    entry = f"solve_count_peaks_{i}"
+    return Task(
+        task_id=f"controlled/count_peaks/{i}@ctx0",
+        prompt=(
+            f"Implement `{entry}(values: list[int]) -> int`. Count positions i where "
+            "values[i] is strictly greater than both direct neighbours."
+        ),
+        context="",
+        test_code=(
+            "def check(candidate):\n"
+            "    assert candidate([1, 3, 2, 4, 1]) == 2\n"
+            "    assert candidate([5, 4, 3]) == 0\n"
+            "    assert candidate([1, 2, 3, 2, 1, 2, 1]) == 2\n"
+            "    assert candidate([]) == 0\n"
+        ),
+        entry_point=entry,
+        suite="controlled_context",
+        metadata={"family": "count_peaks", "difficulty_seed": rng.randint(0, 10_000)},
+    )
+
+
+def _controlled_normalize_path(i: int, rng: random.Random) -> Task:
+    entry = f"solve_normalize_path_{i}"
+    return Task(
+        task_id=f"controlled/normalize_path/{i}@ctx0",
+        prompt=(
+            f"Implement `{entry}(path: str) -> str`. Normalize a Unix-like path by "
+            "removing empty segments and '.', resolving '..', and returning a path "
+            "that always starts with '/'."
+        ),
+        context="",
+        test_code=(
+            "def check(candidate):\n"
+            "    assert candidate('/a//b/./c') == '/a/b/c'\n"
+            "    assert candidate('/a/b/../c') == '/a/c'\n"
+            "    assert candidate('a/../../b') == '/b'\n"
+            "    assert candidate('/') == '/'\n"
+        ),
+        entry_point=entry,
+        suite="controlled_context",
+        metadata={"family": "normalize_path", "difficulty_seed": rng.randint(0, 10_000)},
+    )
+
+
+def _controlled_context(entry_point: str, target_tokens: int, rng: random.Random) -> str:
+    blocks: list[str] = []
+    used = 0
+    block_id = 0
+    while used < target_tokens:
+        name = f"legacy_helper_{block_id}_{rng.randint(100, 999)}"
+        block = (
+            "# --- archived repository context ---\n"
+            f"# Module note: {entry_point} is referenced in planning docs but implemented elsewhere.\n"
+            f"def {name}(items):\n"
+            "    \"\"\"Legacy helper retained for compatibility tests.\"\"\"\n"
+            "    total = 0\n"
+            "    for item in items:\n"
+            "        if isinstance(item, int) and item % 2 == 0:\n"
+            "            total += item\n"
+            "    return total\n\n"
+            "# CI note: do not depend on network, file system, or wall clock state.\n"
+            "# Error handbook: ValueError usually means malformed historical data.\n"
+            "# --- end archived context ---\n\n"
+        )
+        blocks.append(block)
+        used += count_tokens(block)
+        block_id += 1
+    return "".join(blocks)
+
+
+# ---------------------------------------------------------------------------
 # SWE-bench Lite (optional; needs the `datasets` install + network)
 # ---------------------------------------------------------------------------
 def load_swebench_lite(n: Optional[int] = None) -> list[Task]:
@@ -244,7 +371,13 @@ def build_synthetic_tool_use_suite(n: int = 50, seed: int = 42) -> list[Task]:
                 test_code=test_code,
                 entry_point="f0",
                 suite="synthetic_tools",
-                metadata={"parallelism": k, "ops": ops},
+                metadata={
+                    "parallelism": k,
+                    "requires_tool": True,
+                    "force_hybrid_internal": True,
+                    "ops": ops,
+                    "tool_latency_ms": [rng.randint(80, 180) for _ in range(k)],
+                },
             )
         )
     return tasks
