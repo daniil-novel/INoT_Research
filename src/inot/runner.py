@@ -148,6 +148,7 @@ def summary_table(summaries: Iterable[Summary], *, title: str = "Per-architectur
     table.add_column("tokens/task", justify="right")
     table.add_column("input/output", justify="right")
     table.add_column("USD/task", justify="right")
+    table.add_column("RUB/task", justify="right")
     table.add_column("U_tok (Q/Ktok)", justify="right")
     table.add_column("Q$ (per USD)", justify="right")
     table.add_column("latency (s)", justify="right")
@@ -162,6 +163,7 @@ def summary_table(summaries: Iterable[Summary], *, title: str = "Per-architectur
             f"{s.mean_tokens:.0f}",
             f"{s.mean_input_tokens:.0f}/{s.mean_output_tokens:.0f}",
             f"${s.mean_cost_usd:.5f}",
+            f"₽{s.mean_cost_rub:.2f}",
             f"{s.utok_per_kilo:.4f}",
             f"{s.q_per_dollar:.2f}",
             f"{s.mean_latency_seconds:.2f}",

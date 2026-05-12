@@ -43,6 +43,7 @@ def test_core_metrics_match_article_formulas():
     summary = summarize_runs(runs, lam=0.5)
     assert summary.pass_at_1 == 0.5
     assert summary.mean_tokens == 2000
+    assert summary.mean_cost_rub == 0.0
     assert summary.utok_per_kilo == 0.25
     assert summary.q_per_dollar == 25.0
 

@@ -53,6 +53,9 @@ class Config:
         prices = self.get("llm.prices_usd_per_mtok", {}) or {}
         return prices.get(model, {"input": 0.0, "output": 0.0})
 
+    def usd_to_rub(self) -> float:
+        return float(self.get("accounting.usd_to_rub", 100.0))
+
     def api_key(self) -> str:
         env_var = self.get("llm.api_key_env", "OPENROUTER_API_KEY")
         return os.environ.get(env_var, "")

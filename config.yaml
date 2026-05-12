@@ -23,6 +23,12 @@ llm:
   # Budget guard: hard cap in USD per single experiment run; raises if exceeded.
   hard_budget_usd: 50.0
 
+accounting:
+  # Fixed conversion rate for reproducible reports. Update manually before
+  # a run if you need a fresh RUB estimate; raw scientific accounting stays USD.
+  usd_to_rub: 100.0
+  currency_note: "Manual fixed rate for reproducible experiment reports"
+
 architectures:
   K: 3              # candidates per inner iteration (rwork output cardinality)
   I: 3              # max iterations (inner loop / external pipeline)

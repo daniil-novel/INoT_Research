@@ -177,6 +177,7 @@ class OpenRouterClient:
         cost = (in_tok / 1_000_000.0) * price.get("input", 0.0) + (
             out_tok / 1_000_000.0
         ) * price.get("output", 0.0)
+        cost_rub = cost * self.cfg.usd_to_rub()
         self.spent_usd += cost
 
         return ChatResult(
@@ -186,6 +187,7 @@ class OpenRouterClient:
                 input_tokens=in_tok,
                 output_tokens=out_tok,
                 cost_usd=cost,
+                cost_rub=cost_rub,
                 role=role,
                 architecture=architecture,
                 iteration=iteration,
@@ -257,6 +259,7 @@ class DryRunClient:
         cost = (in_tok / 1_000_000.0) * price.get("input", 0.0) + (
             out_tok / 1_000_000.0
         ) * price.get("output", 0.0)
+        cost_rub = cost * self.cfg.usd_to_rub()
         self.spent_usd += cost
         return ChatResult(
             text=text,
@@ -265,6 +268,7 @@ class DryRunClient:
                 input_tokens=in_tok,
                 output_tokens=out_tok,
                 cost_usd=cost,
+                cost_rub=cost_rub,
                 role=role,
                 architecture=architecture,
                 iteration=iteration,

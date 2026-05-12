@@ -66,6 +66,7 @@ class TokenUsage:
     input_tokens: int
     output_tokens: int
     cost_usd: float
+    cost_rub: float = 0.0
     role: str = "unspecified"   # 'plan', 'work', 'crit', 'self_check', 'compress'
     architecture: str = ""
     iteration: int = 0
@@ -135,6 +136,10 @@ class RunResult:
         return sum(u.cost_usd for u in self.usages)
 
     @property
+    def total_cost_rub(self) -> float:
+        return sum(u.cost_rub for u in self.usages)
+
+    @property
     def passed(self) -> bool:
         return self.verification.passed
 
@@ -152,6 +157,7 @@ class RunResult:
             "input_tokens": self.total_input_tokens,
             "output_tokens": self.total_output_tokens,
             "cost_usd": self.total_cost_usd,
+            "cost_rub": self.total_cost_rub,
             "wall_clock_seconds": self.wall_clock_seconds,
             "iterations_used": self.iterations_used,
             "rerun_count": self.rerun_count,

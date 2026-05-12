@@ -1,213 +1,267 @@
-# Hybrid-INoT empirical validation suite
+# Hybrid-INoT: воспроизводимая исследовательская инфраструктура
 
-Reproducible code for the experimental program of the article
+Этот репозиторий содержит код для эмпирической проверки гипотез статьи и
+курсовой работы о Hybrid-INoT: гибридной агентной архитектуре с внутренней
+ролевой сегрегацией для инженерных задач в условиях длинного общего контекста.
 
-> Privezentsev D. **Hybrid-INoT: гибридная агентная архитектура с внутренней
-> ролевой сегрегацией для инженерных задач в условиях длинного общего
-> контекста.** HSE, Moscow, 2026.
+Цель проекта: не имитация эксперимента, а повторяемый научный запуск с
+реальными LLM-вызовами через OpenRouter, учётом токенов, стоимости в USD/RUB,
+статистическими тестами, графиками, таблицами и терминальным просмотром
+результатов.
 
-The suite implements the control baseline and four assistant architectures
-(CTRL / B0 / B1 / B2 / B3) and the five experiments E1–E5, with statistical tests
-prescribed in §3.2 / §7.1 (Wilcoxon signed-rank, McNemar, 95% bootstrap CI
-with 10⁴ resamples, Holm–Bonferroni FWER correction).
+## Что проверяется
 
-LLM calls go through **OpenRouter** so the same code can target any of
-GPT-4o, Claude Sonnet, etc. Token and dollar counts come from the provider's
-own `usage` block (with `tiktoken` `cl100k_base` fallback).
+Сравниваются пять конфигураций:
 
----
+| Конфигурация | Смысл |
+|---|---|
+| `CTRL_NoAssistant` | контрольный сценарий без ассистента и без LLM-вызовов |
+| `B0_SingleLarge` | один вызов большой модели |
+| `B1_SelfRefine` | self-refine цикл одной большой модели |
+| `B2_ClassicalMAS` | классическая MAS: planner / worker / critic отдельными вызовами |
+| `B3_HybridINoT` | роли planner / worker / critic внутри одного вызова по сжатому контексту |
 
-## Quickstart
+Гипотезы:
 
-### 1. Install
+| ID | Проверка | Основной модуль | Артефакт |
+|---|---|---|---|
+| H1 | рост `U_tok` минимум на 15% при длинном контексте без падения `pass@1` более чем на 2 п.п. | `src/inot/experiments/e1_humaneval_pilot.py` | `results/e1/H1_VERDICT.md` |
+| H2 | малая модель самопроверки экономически оправдана: `C_check^S < (ρ0−ρ1)·C_rerun^L` | `src/inot/experiments/e4_self_check.py` | `results/e4/H2_VERDICT.md` |
+| H3 | при независимых параллельных tool-вызовах преимущество Hybrid-INoT по latency исчезает | `src/inot/experiments/e2_ablation.py`, `src/inot/tools/synthetic.py` | `results/e2/e2c/summary.json` |
+| τ* | пороговая длина контекста, где Hybrid-INoT начинает выигрывать по `U_tok` | `src/inot/experiments/e3_context_scaling.py` | `results/e3/tau_star.json` |
+| TCO | экстраполяция полной стоимости владения и чувствительность к ценам | `src/inot/experiments/e5_tco.py` | `results/e5/tco_summary.json` |
 
-```bash
-cd hybrid_inot_research
-python -m venv .venv
-# Windows:
+Статистика: парный критерий Вилкоксона, McNemar для `pass/fail`, bootstrap CI
+95% с 10 000 ресэмплирований, поправка Холма-Бонферрони.
+
+## Быстрый старт на Windows
+
+Из вашей ситуации ошибка
+
+```text
+C:\Python311\python.exe: No module named inot
+```
+
+возникает потому, что команда была запущена из `E:\JarvisSonoma` системным
+Python, а пакет установлен в проекте `E:\JarvisSonoma\hybrid_inot_research`.
+
+Правильный запуск:
+
+```powershell
+cd E:\JarvisSonoma\hybrid_inot_research
+powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1 -Dev
 .\.venv\Scripts\Activate.ps1
-# Unix:
-source .venv/bin/activate
-
-pip install -e .
-```
-
-Python 3.10+ required.
-
-### 2. Configure your OpenRouter key
-
-```bash
-copy .env.example .env       # Windows
-# or:  cp .env.example .env  # Unix
-# Then edit .env and put your key in OPENROUTER_API_KEY
-```
-
-Get a key at <https://openrouter.ai/keys>.
-The default models are `openai/gpt-4o-2024-11-20` (large) and
-`openai/gpt-4o-mini-2024-07-18` (small); change them in `config.yaml`.
-
-A hard budget cap (`llm.hard_budget_usd`, default **$50**) raises
-`BudgetExceeded` if you exceed it — adjust before launching the full suite.
-
-### 3. Smoke-test plumbing (no spending)
-
-```bash
 python -m inot check
 ```
 
-This runs every architecture once on two HumanEval tasks against the
-deterministic `DryRunClient` — no network, no money.
+После активации окружения реальные эксперименты запускаются так:
 
-### 4. Run experiments
-
-Single experiment:
-
-```bash
-python -m inot e1 --n 20 --seeds "42,123"
+```powershell
+python -m inot e1 --n 20 --seeds "42,123" --suite both
 python -m inot view e1
 ```
 
-Run the H1 check on both datasets from the coursework text:
+Если не хотите активировать venv, используйте проектный Python явно:
 
-```bash
+```powershell
+cd E:\JarvisSonoma\hybrid_inot_research
+.\.venv\Scripts\python.exe -m inot e1 --n 20 --seeds "42,123" --suite both
+```
+
+Или wrapper:
+
+```powershell
+.\scripts\inot.ps1 e1 --n 20 --seeds "42,123" --suite both
+```
+
+## OpenRouter-ключи
+
+Ключ хранится локально в файле:
+
+```text
+E:\JarvisSonoma\hybrid_inot_research\.env
+```
+
+Файл создаётся из шаблона:
+
+```powershell
+copy .env.example .env
+```
+
+Внутри должно быть:
+
+```env
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_HTTP_REFERER=https://github.com/daniil-novel/INoT_Research
+OPENROUTER_X_TITLE=hybrid-inot-research
+```
+
+`.env` и `.env.*` добавлены в `.gitignore`, поэтому ключ не должен попасть в
+GitHub. Код читает ключ через `Config.api_key()`: имя переменной задано в
+`config.yaml`:
+
+```yaml
+llm:
+  api_key_env: OPENROUTER_API_KEY
+```
+
+Важно: `python -m inot check` использует `DryRunClient` и не делает сетевых
+запросов. Все команды `e1`–`e5` без `--dry-run` используют реальный
+`OpenRouterClient`.
+
+## Учёт токенов и стоимости
+
+Каждый LLM-вызов сохраняет:
+
+- модель;
+- роль (`planner`, `worker`, `critic`, `inot_combined`, `small_check`, ...);
+- `input_tokens`;
+- `output_tokens`;
+- `cost_usd`;
+- `cost_rub`;
+- latency.
+
+Источник токенов:
+
+1. сначала используется `usage` block из ответа OpenRouter;
+2. если провайдер не вернул usage, используется fallback через `tiktoken`.
+
+Цены задаются в `config.yaml`:
+
+```yaml
+llm:
+  prices_usd_per_mtok:
+    openai/gpt-4o-2024-11-20:      {input: 2.50, output: 10.00}
+    openai/gpt-4o-mini-2024-07-18: {input: 0.15, output: 0.60}
+```
+
+Рубли считаются по фиксированному курсу для воспроизводимости:
+
+```yaml
+accounting:
+  usd_to_rub: 100.0
+```
+
+Если нужен другой курс, измените `accounting.usd_to_rub` перед запуском.
+Научная отчётность всё равно остаётся в USD, а RUB используется как удобная
+локальная оценка.
+
+Жёсткий бюджет:
+
+```yaml
+llm:
+  hard_budget_usd: 50.0
+```
+
+Клиент делает preflight-оценку стоимости запроса и выбрасывает
+`BudgetExceeded`, если следующий запрос может превысить лимит.
+
+## Основные команды
+
+Smoke test без денег и без сети:
+
+```powershell
+python -m inot check
+```
+
+H1 на HumanEval:
+
+```powershell
+python -m inot e1 --n 20 --seeds "42,123" --suite humaneval
+```
+
+H1 на кастомном controlled-context benchmark:
+
+```powershell
+python -m inot e1 --n 20 --seeds "42,123" --suite controlled
+```
+
+H1 на обоих наборах:
+
+```powershell
 python -m inot e1 --n 20 --seeds "42,123" --suite both
 ```
 
-Full pipeline (E1..E5, sequential):
+Все эксперименты:
 
-```bash
+```powershell
 python -m inot all --n 30 --seeds "42,123,456"
+```
+
+Просмотр результатов в терминале:
+
+```powershell
+python -m inot view e1
+python -m inot view e2
 python -m inot view e3
+python -m inot view e4
+python -m inot view e5
 ```
 
-The article's full spec (`--n 164 --seeds "42,123,456,789,1337"`) costs on
-the order of **$10–30** at GPT-4o prices for the full suite. Pilot mode
-(`--n 20 --seeds "42"`) typically lands under **$2**.
+## Структура проекта
 
----
-
-## What gets validated
-
-| ID | Hypothesis / quantity | Code | Verdict file |
-|---|---|---|---|
-| H1 | `ΔU_tok ≥ 15%` at long `|C0|`, `pass@1` regression ≤ 2 p.p.; HumanEval plus controlled custom context suite | `experiments/e1_humaneval_pilot.py`, `tasks.build_controlled_context_suite` | `results/e1/H1_VERDICT.md` |
-| τ⋆ | exists and `< 16384` tokens | `experiments/e3_context_scaling.py` | `results/e3/tau_star.json` |
-| H2 | `C^S_check < (ρ0−ρ1) · C^L_rerun` (eq. 16) | `experiments/e4_self_check.py` | `results/e4/H2_VERDICT.md` |
-| H3 | B3 latency advantage vanishes at `p_‖ ≥ 2`; measured with serial vs parallel synthetic external tools | `experiments/e2_ablation.py::_e2c_parallel_tools`, `tools.synthetic` | `results/e2/e2c/summary.json` |
-| ablations | each component (compress / critic / self-check) significant | `experiments/e2_ablation.py::_e2a_ablation` | `results/e2/e2a/pairwise_vs_full.json` |
-| TCO | monthly Δcost > 0 at lower CI, robust to ±50% prices | `experiments/e5_tco.py` | `results/e5/tco_summary.json` |
-
----
-
-## Repository layout
-
-```
+```text
 hybrid_inot_research/
-├── README.md                       <- you are here
-├── pyproject.toml
-├── config.yaml                     <- model, prices, hyperparams (K, I, λ, …)
-├── .env.example                    <- template for OPENROUTER_API_KEY
-├── docs/                           <- one Markdown card per experiment
-│   ├── e1.md … e5.md
-├── data/                           <- HumanEval JSONL cached on first run
-├── results/                        <- all artefacts land here
+├── README.md
+├── CHANGELOG.md
+├── config.yaml
+├── .env.example
+├── docs/                         Markdown-описания E1–E5
+├── scripts/                      Windows setup и CLI wrapper
+├── data/                         кэш HumanEval
+├── results/                      результаты запусков
+├── tests/                        pytest-проверки инфраструктуры
 └── src/inot/
-    ├── types.py                    Task, TokenUsage, RunResult, VerificationResult
-    ├── config.py                   YAML + .env loader
-    ├── llm/__init__.py             OpenRouterClient (real) + DryRunClient (mock)
-    ├── tasks/__init__.py           HumanEval, controlled context, SWE-bench Lite, Synthetic Tool-Use
-    ├── tools/                      deterministic external-tool latency harness for H3
-    ├── compression.py              Algorithm 2 surrogate
-    ├── verification/__init__.py    sandboxed pytest + lint + sec + maintainability
-    ├── architectures/
-    │   ├── base.py                 BaseAgent + role-system prompts
-    │   ├── no_assistant.py         CTRL baseline: no LLM, starter scaffold only
-    │   ├── single_large.py         B0
-    │   ├── self_refine.py          B1 (Madaan et al. 2023)
-    │   ├── classical_mas.py        B2 (planner+worker+critic; separate calls)
-    │   └── hybrid_inot.py          B3 (Algorithm 1 + RouteMode + selective rerun)
-    ├── metrics/
-    │   ├── core.py                 formulas (17)–(23) — U_tok, Q$, VCR, MAS_i
-    │   └── stats.py                Wilcoxon, McNemar, bootstrap, Holm–Bonferroni
-    ├── runner.py                   shared run/save/align/table helpers
-    ├── doc_viewer.py               `inot view` — rich panels in the terminal
-    ├── experiments/
-    │   ├── e1_humaneval_pilot.py
-    │   ├── e2_ablation.py          (E2a, E2b, E2c, E2d)
-    │   ├── e3_context_scaling.py
-    │   ├── e4_self_check.py
-    │   └── e5_tco.py
-    └── cli.py                      Typer entrypoint (`python -m inot`)
+    ├── llm/                      OpenRouterClient + DryRunClient
+    ├── architectures/            CTRL, B0, B1, B2, B3
+    ├── tasks/                    HumanEval, controlled context, SWE-bench Lite, synthetic tools
+    ├── tools/                    измерение serial/parallel tool latency для H3
+    ├── metrics/                  U_tok, Q$, VCR, MAS_i, статистика
+    ├── experiments/              E1–E5
+    ├── verification/             sandboxed verification
+    ├── runner.py                 запуск grid, сохранение, таблицы
+    └── doc_viewer.py             красивый терминальный viewer
 ```
 
----
+## Проверки разработки
 
-## Mapping article ↔ code
+```powershell
+python -m ruff check src tests
+python -m pytest -q
+python -m inot check
+```
 
-Every formula and algorithm of the article has a literal counterpart:
+## Типичные проблемы
 
-| Article | Code |
-|---|---|
-| Control scenario (без ассистента) | `inot.architectures.NoAssistantAgent` |
-| Definition 1 (Task `(x, C0, Z, V)`) | `inot.types.Task` |
-| Equation (1) (`Θ(\|A\|·\|C0\|) + Θ(\|A\|²ħ)`) | `B2_ClassicalMAS` payload size + role count |
-| Definition 3 (Hybrid-INoT) | `inot.architectures.HybridINoTAgent` |
-| Definition 4 (`RouteMode`) | `HybridINoTAgent._route_mode` |
-| Algorithm 1 (inner loop) | `HybridINoTAgent._solve` |
-| Algorithm 2 (compression) | `inot.compression.compress` |
-| Algorithm 3 (selective rerun) | `HybridINoTAgent._selective_rerun` |
-| Statement 2 (eq. 7) | E1 (paired Wilcoxon) + E3 (τ⋆ bootstrap) |
-| Statement 3 (eq. 13) | upper bound asserted in `_solve` via `B`, `I`, `K` caps |
-| Inequality (16) | E4 (`H2_VERDICT.md`) |
-| Formulas (17)–(20) | `inot.metrics.core` |
-| Formula (21) M_i | `inot.verification.maintainability_score` |
-| Eq. (22) SCR | reported via `verification.tests_passed` |
-| Eq. (24) TCO | E5 |
+### `No module named inot`
 
----
+Вы не в venv или не в папке проекта. Решение:
 
-## Reproducibility checklist (article §7.1)
+```powershell
+cd E:\JarvisSonoma\hybrid_inot_research
+.\.venv\Scripts\Activate.ps1
+python -m inot check
+```
 
-- ✅ task IDs fixed (`humaneval.jsonl` cached and read deterministically),
-- ✅ custom controlled-context suite for H1 isolates context length from task difficulty,
-- ✅ control baseline `CTRL_NoAssistant` spends zero tokens and anchors productivity comparisons,
-- ✅ H3 has deterministic serial/parallel tool-latency measurements in addition to LLM traces,
-- ✅ five default seeds `{42, 123, 456, 789, 1337}`,
-- ✅ model snapshot IDs pinned in `config.yaml`,
-- ✅ token prices captured in `config.yaml` with measurement date in the YAML
-  comment,
-- ✅ statistical pipeline: paired Wilcoxon, McNemar (binary), 10⁴ bootstrap,
-  Holm–Bonferroni (`statistics:` block in `config.yaml`).
+### `OPENROUTER_API_KEY is empty`
 
----
+Создайте `.env`:
 
-## Cost & runtime estimates (rough, GPT-4o mid-2025 prices)
+```powershell
+copy .env.example .env
+notepad .env
+```
 
-| Command | Calls | Time | Cost |
-|---|---|---|---|
-| `inot check` | 4 dry-run | <1 s | $0.00 |
-| `inot e1 --n 10 --seeds "42"` | ~120 calls | ~5 min | ~$0.30 |
-| `inot e1 --n 164 --seeds "42,123,456,789,1337"` | ~10 000 calls | hours | ~$10 |
-| `inot all --n 30 --seeds "42,123"` | ~5 000 calls | ~30 min | ~$3 |
+И впишите реальный ключ.
 
----
+### `BudgetExceeded`
 
-## Troubleshooting
+Сработал лимит `llm.hard_budget_usd`. Для пилотов уменьшайте `--n` и число
+seed-ов; для полного запуска осознанно повышайте лимит в `config.yaml`.
 
-- **`OPENROUTER_API_KEY is empty`** — copy `.env.example` to `.env` and fill it in.
-- **`BudgetExceeded`** — raise `llm.hard_budget_usd` in `config.yaml`.
-- **`ModuleNotFoundError: datasets`** — `pip install -e .` reinstalls;
-  HumanEval download falls back to GitHub raw URL if `datasets` is missing.
-- **Tests time out** — bump the timeout in `Verifier(config, timeout_seconds=...)`
-  or in `inot/verification/__init__.py::run_tests`.
-- **Different model** — edit `llm.large_model` / `llm.small_model` in `config.yaml`
-  and add the new model to `llm.prices_usd_per_mtok`.
+## Лицензирование и цитирование
 
----
-
-## Citing
-
-If you use this code, please cite the article:
+Если используете код в работе, цитируйте статью/курсовую:
 
 ```bibtex
 @article{Privezentsev2026HybridINoT,
@@ -215,7 +269,6 @@ If you use this code, please cite the article:
   title   = {Hybrid-INoT: гибридная агентная архитектура с внутренней
              ролевой сегрегацией для инженерных задач в условиях длинного
              общего контекста},
-  journal = {Manuscript, HSE},
-  year    = {2026},
+  year    = {2026}
 }
 ```

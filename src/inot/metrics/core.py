@@ -26,6 +26,7 @@ class Summary:
     mean_input_tokens: float
     mean_output_tokens: float
     mean_cost_usd: float        # C̄_inf
+    mean_cost_rub: float
     mean_latency_seconds: float
     mean_iterations: float
     mean_rerun_count: float
@@ -97,6 +98,7 @@ def summarize_runs(results: list[RunResult], *, lam: float = 0.5) -> Summary:
         return Summary(
             architecture="?", n=0, pass_at_1=0.0, mean_tokens=0.0,
             mean_input_tokens=0.0, mean_output_tokens=0.0, mean_cost_usd=0.0,
+            mean_cost_rub=0.0,
             mean_latency_seconds=0.0, mean_iterations=0.0,
             mean_rerun_count=0.0, routed_external_share=0.0,
             mean_maintainability=0.0, utok_per_kilo=0.0, q_per_dollar=0.0,
@@ -112,6 +114,7 @@ def summarize_runs(results: list[RunResult], *, lam: float = 0.5) -> Summary:
         mean_input_tokens=mean(r.total_input_tokens for r in results),
         mean_output_tokens=mean(r.total_output_tokens for r in results),
         mean_cost_usd=mean(r.total_cost_usd for r in results),
+        mean_cost_rub=mean(r.total_cost_rub for r in results),
         mean_latency_seconds=mean(r.wall_clock_seconds for r in results),
         mean_iterations=mean(r.iterations_used for r in results),
         mean_rerun_count=mean(r.rerun_count for r in results),
@@ -125,5 +128,6 @@ def summarize_runs(results: list[RunResult], *, lam: float = 0.5) -> Summary:
             "tokens_std": pstdev(r.total_tokens for r in results) if n > 1 else 0.0,
             "tokens_median": median(r.total_tokens for r in results),
             "cost_std": pstdev(r.total_cost_usd for r in results) if n > 1 else 0.0,
+            "cost_rub_std": pstdev(r.total_cost_rub for r in results) if n > 1 else 0.0,
         },
     )

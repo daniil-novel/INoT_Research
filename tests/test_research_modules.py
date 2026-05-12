@@ -39,6 +39,7 @@ def test_no_assistant_baseline_uses_zero_llm_calls():
     assert result.architecture == "CTRL_NoAssistant"
     assert result.total_tokens == 0
     assert result.total_cost_usd == 0.0
+    assert result.total_cost_rub == 0.0
 
 
 def test_synthetic_tool_latency_parallel_is_faster_than_serial():
@@ -46,3 +47,11 @@ def test_synthetic_tool_latency_parallel_is_faster_than_serial():
     serial = measure_synthetic_tool_latency(tasks, mode="serial")
     parallel = measure_synthetic_tool_latency(tasks, mode="parallel")
     assert sum(r.expected_latency_ms for r in serial) > sum(r.expected_latency_ms for r in parallel)
+
+
+def test_dry_run_records_rub_cost_from_fixed_rate():
+    cfg = _config()
+    llm = DryRunClient(cfg)
+    result = llm.chat([{"role": "user", "content": "hello"}], "test/large", max_tokens=10)
+    assert result.usage.cost_usd > 0
+    assert result.usage.cost_rub == result.usage.cost_usd * cfg.usd_to_rub()
