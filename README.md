@@ -232,6 +232,71 @@ python -m inot view e5
 python -m inot view e6
 ```
 
+## Исследования
+
+### E6: Gemini Pro vs Gemini Flash-Lite
+
+Последний сохранённый реальный запуск:
+
+```powershell
+python -m inot e6 --n 10 --seeds 42 --suite controlled --output results\e6
+```
+
+Условия:
+
+- набор задач: `controlled`;
+- задач: `10`;
+- seed: `42`;
+- длины контекста: `512`, `2048`, `8192`;
+- архитектуры: `B2_ClassicalMAS`, `B3_HybridINoT`;
+- дорогая модель: `google/gemini-3.1-pro-preview`;
+- дешёвая модель: `google/gemini-3.1-flash-lite`;
+- суммарная стоимость запуска: примерно `$2.34`, то есть ниже лимита `$10`.
+
+Главный вывод: на этом controlled-наборе Flash-Lite не ухудшил `pass@1`
+относительно Pro ни в Classical-MAS, ни в Hybrid-INoT, но оказался существенно
+дешевле.
+
+| Архитектура | Δpass@1 Flash-Lite − Pro | Средняя стоимость Flash-Lite от Pro |
+|---|---:|---:|
+| `B2_ClassicalMAS` | `+0.00 п.п.` | `7.15%` |
+| `B3_HybridINoT` | `+0.00 п.п.` | `5.61%` |
+
+По длинам контекста:
+
+| Архитектура | Контекст | Стоимость Flash-Lite от Pro | p-value Вилкоксона по `U_tok` |
+|---|---:|---:|---:|
+| `B2_ClassicalMAS` | `512` | `4.85%` | `0.001953` |
+| `B2_ClassicalMAS` | `2048` | `6.92%` | `0.001953` |
+| `B2_ClassicalMAS` | `8192` | `9.70%` | `0.001953` |
+| `B3_HybridINoT` | `512` | `4.41%` | `0.001953` |
+| `B3_HybridINoT` | `2048` | `5.40%` | `0.001953` |
+| `B3_HybridINoT` | `8192` | `7.02%` | `0.001953` |
+
+Интерпретация:
+
+- Для данных controlled-задач дешёвая модель достаточно сильна: падения
+  `pass@1` не наблюдается.
+- Экономия сильнее проявилась в Hybrid-INoT: Flash-Lite стоил около `5.61%`
+  от Pro против `7.15%` в Classical-MAS.
+- По `U_tok` различия между Flash-Lite и Pro статистически значимы по парному
+  критерию Вилкоксона, но это связано не с падением качества, а с другой
+  токенной и стоимостной структурой ответов.
+- Ограничение: это не финальный большой вывод по статье, а недорогой реальный
+  прогон на `10` controlled-задачах и одном seed. Для финального вывода лучше
+  повторить E6 на HumanEval и нескольких seed-ах.
+
+Сохранённые артефакты:
+
+- [results/e6/E6_VERDICT.md](results/e6/E6_VERDICT.md)
+- [results/e6/summary.json](results/e6/summary.json)
+- [results/e6/flash_vs_pro.json](results/e6/flash_vs_pro.json)
+- [results/e6/table.txt](results/e6/table.txt)
+- [results/e6/fig_cost_usd_flash_vs_pro.png](results/e6/fig_cost_usd_flash_vs_pro.png)
+- [results/e6/fig_pass_at_1_flash_vs_pro.png](results/e6/fig_pass_at_1_flash_vs_pro.png)
+- [results/e6/fig_quality_degradation_pp.png](results/e6/fig_quality_degradation_pp.png)
+- [results/e6/fig_utok_flash_vs_pro.png](results/e6/fig_utok_flash_vs_pro.png)
+
 ## Структура проекта
 
 ```text

@@ -11,6 +11,8 @@ venv/
 .ruff_cache/
 results/*
 !results/.gitkeep
+!results/e6/
+!results/e6/**
 data/humaneval.jsonl
 data/cache/
 build/
