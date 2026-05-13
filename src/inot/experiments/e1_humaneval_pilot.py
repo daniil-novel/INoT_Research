@@ -1,36 +1,25 @@
-"""E1 — Pilot on HumanEval (§7.2 of the article).
+"""E1 — проверка H1 на HumanEval и controlled-context наборе.
 
-Verifies hypothesis H1:
-    "There exists a context length τ⋆ such that for |C0|>τ⋆ Hybrid-INoT
-    achieves U_tok improvement >= 15% over Classical-MAS while pass@1 does
-    not degrade by more than 2 p.p."
+Проверяет гипотезу H1:
+    существует пороговая длина контекста τ⋆, после которой Hybrid-INoT
+    даёт прирост U_tok не менее 15% относительно Classical-MAS, а pass@1
+    не ухудшается более чем на 2 процентных пункта.
 
-Configurations compared:
+Сравниваемые конфигурации:
     CTRL NoAssistant | B0 SingleLarge | B1 SelfRefine | B2 ClassicalMAS | B3 HybridINoT
 
-Each task is run at three context lengths {512, 2048, 8192} (article spec)
-across the chosen seeds. Use ``suite='both'`` to run both HumanEval and the
-controlled custom context benchmark described in the coursework text.
-Statistical testing follows §7.1:
-    * paired Wilcoxon signed-rank on per-task U_tok arrays;
-    * 95% bootstrap percentile CI (10⁴ resamples) on ΔU_tok;
-    * Holm-Bonferroni across the three context-length subgroups;
-    * McNemar on paired pass/fail vectors for B3 vs B2.
+Каждая задача запускается на длинах контекста {512, 2048, 8192} и на выбранных
+seed-ах. Параметр ``suite='both'`` включает одновременно HumanEval и
+controlled-context benchmark из курсовой.
 
-Outputs (in ``results/e1/``):
-    runs.json                      — raw RunResult dump
-    summary.json                   — per-(arch, ctx) summaries
-    pairwise_b3_vs_b2.json         — Wilcoxon + bootstrap + Holm-Bonferroni
-    table.txt                      — rich table snapshot
-    fig_tokens_by_context.png      — bar plot tokens/task per arch×ctx
-    fig_cost_usd_by_context.png    — USD/task curves per arch×ctx
-    fig_cost_rub_by_context.png    — RUB/task curves per arch×ctx
-    fig_utok_by_context.png        — line plot U_tok vs context length
-    fig_pass_at_1_by_context.png   — pass@1 (%) by context length
-    fig_cumulative_errors.png      — cumulative failed runs by architecture
-    fig_context_transfer_tokens.png — mean transmitted input/context tokens
-    fig_context_juggling_events.png — mean role/model handoff count
-    H1_VERDICT.md                  — explicit pass/fail of the hypothesis
+Статистика:
+    * парный критерий Вилкоксона по per-task U_tok;
+    * bootstrap CI 95% для ΔU_tok;
+    * Holm-Bonferroni для множественных сравнений;
+    * McNemar по парным pass/fail векторам B3 и B2.
+
+Графики подписываются на английском, чтобы их можно было напрямую вставлять в
+англоязычные материалы. Документы и текстовые выводы формируются на русском.
 """
 from __future__ import annotations
 
@@ -94,7 +83,7 @@ def run(
                     "B2_ClassicalMAS":  make("B2", llm=llm, config=cfg),
                     "B3_HybridINoT":    make("B3", llm=llm, config=cfg),
                 }
-                console.rule(f"[bold]E1 :: {suite_label} :: context length = {ctx_len} tokens[/bold]")
+                console.rule(f"[bold]E1 :: {suite_label} :: длина контекста = {ctx_len} токенов[/bold]")
                 r = run_grid(agents, tasks, seeds=seeds, progress_label=f"E1 {suite_label} ctx={ctx_len}")
                 for x in r:
                     x.extra["suite_label"] = suite_label
@@ -106,7 +95,7 @@ def run(
 
     save_results(all_results, out_dir / "runs.json")
 
-    # ---------- per-(arch, ctx) summaries -----------------------------------
+    # ---------- Сводки по каждому набору, архитектуре и контексту -----------
     summaries: dict[tuple[str, str, int], dict] = {}
     arch_names = ("CTRL_NoAssistant", "B0_SingleLarge", "B1_SelfRefine", "B2_ClassicalMAS", "B3_HybridINoT")
     for suite_label in suite_labels:
@@ -124,13 +113,12 @@ def run(
         encoding="utf-8",
     )
 
-    # ---------- pairwise B3 vs B2 by ctx + Holm-Bonferroni -----------------
+    # ---------- Парные сравнения B3 и B2 по контекстам + Holm-Bonferroni ----
     pairwise: list[dict] = []
     pvals: list[float] = []
 
-    # Per-task U_tok: pass / (tokens/1000)  approximated per-task as
-    # 1000 / total_tokens if passed else 0  (so the *mean* per task aligns
-    # with the overall U_tok formula).
+    # Per-task U_tok задаём как 1000 / total_tokens для успешного решения и 0
+    # для неуспешного. Так средняя величина сохраняет смысл формулы U_tok.
     def _per_task_utok(r: RunResult) -> float:
         return (1000.0 / r.total_tokens) if (r.passed and r.total_tokens > 0) else 0.0
 
@@ -148,7 +136,7 @@ def run(
             cmp = pairwise_compare(b, a, label=f"U_tok B3-B2 {suite_label} @ctx{ctx_len}",
                                    bootstrap_resamples=cfg.get("statistics.bootstrap_resamples", 10000),
                                    ci_level=cfg.get("statistics.ci_level", 0.95))
-            # paired pass/fail
+            # Парный binary pass/fail для McNemar.
             pa, pb = align_pairs(b2, b3, metric_a=lambda r: 1 if r.passed else 0,
                                  metric_b=lambda r: 1 if r.passed else 0)
             chi2, p_mc = mcnemar_paired(pa, pb)
@@ -171,12 +159,12 @@ def run(
     (out_dir / "pairwise_b3_vs_b2.json").write_text(
         json.dumps(pairwise, indent=2), encoding="utf-8")
 
-    # ---------- H1 verdict --------------------------------------------------
+    # ---------- Текстовый вывод по H1 ---------------------------------------
     delta = float(cfg.get("experiments.delta_H1", 0.15))
     pp_tol = float(cfg.get("experiments.pass_at_1_tolerance_pp", 2.0)) / 100.0
     long_ctx = max(context_lengths)
     verdicts = {}
-    verdict_md = f"# H1 Verdict (E1, context={long_ctx} tokens)\n\n"
+    verdict_md = f"# Вывод по H1 (E1, контекст={long_ctx} токенов)\n\n"
     for suite_label in suite_labels:
         s_b2 = summaries[(suite_label, "B2_ClassicalMAS", long_ctx)]
         s_b3 = summaries[(suite_label, "B3_HybridINoT", long_ctx)]
@@ -187,38 +175,38 @@ def run(
         holm_long = next(d["holm_bonferroni_rejected"] for d in pairwise
                          if d["suite"] == suite_label and d["context_length"] == long_ctx)
         verdict = (
-            "CONFIRMED"
+            "ПОДТВЕРЖДЕНА"
             if (rel_utok_gain >= delta and pass1_drop <= pp_tol and holm_long)
-            else "NOT CONFIRMED"
+            else "НЕ ПОДТВЕРЖДЕНА"
         )
         verdicts[suite_label] = verdict
         verdict_md += (
             f"## {suite_label}\n\n"
-            f"- ΔU_tok (B3-B2) / B2 = **{rel_utok_gain*100:+.2f}%**  (threshold δ_H1 = {delta*100:.0f}%)\n"
-            f"- pass@1 drop (B2-B3) = **{pass1_drop*100:+.2f} p.p.**  (tolerance ≤ {pp_tol*100:.0f} p.p.)\n"
-            f"- Wilcoxon p (per-task U_tok B3 vs B2) = **{pvalue_long:.4g}**\n"
-            f"- Holm-Bonferroni rejection at α=0.05: **{holm_long}**\n"
-            f"- Decision: **H1 {verdict}**\n\n"
+            f"- ΔU_tok (B3-B2) / B2 = **{rel_utok_gain*100:+.2f}%**  (порог δ_H1 = {delta*100:.0f}%)\n"
+            f"- падение pass@1 (B2-B3) = **{pass1_drop*100:+.2f} п.п.**  (допуск ≤ {pp_tol*100:.0f} п.п.)\n"
+            f"- p-value Вилкоксона для per-task U_tok B3 vs B2 = **{pvalue_long:.4g}**\n"
+            f"- отклонение H0 после Holm-Bonferroni при α=0.05: **{holm_long}**\n"
+            f"- решение: **H1 {verdict}**\n\n"
         )
-    h1_verdict = "CONFIRMED" if all(v == "CONFIRMED" for v in verdicts.values()) else "NOT CONFIRMED"
-    verdict_md += f"## Overall Decision\n\n**H1: {h1_verdict}**\n"
+    h1_verdict = "ПОДТВЕРЖДЕНА" if all(v == "ПОДТВЕРЖДЕНА" for v in verdicts.values()) else "НЕ ПОДТВЕРЖДЕНА"
+    verdict_md += f"## Итоговое решение\n\n**H1: {h1_verdict}**\n"
     (out_dir / "H1_VERDICT.md").write_text(verdict_md, encoding="utf-8")
     console.print(verdict_md)
 
-    # ---------- pretty summary table --------------------------------------
+    # ---------- Читаемая таблица для терминала -----------------------------
     flat_summaries = []
     for (suite_label, arch, ctx_len), s_dict in summaries.items():
         from ..metrics import Summary
         s = Summary(**s_dict)
         s.architecture = f"{suite_label}:{arch}@ctx{ctx_len}"
         flat_summaries.append(s)
-    table = summary_table(flat_summaries, title="E1 — per-architecture × context")
+    table = summary_table(flat_summaries, title="E1 — сводка по архитектурам и длинам контекста")
     console.print(table)
     with (out_dir / "table.txt").open("w", encoding="utf-8") as f:
         from rich.console import Console as _C
         _C(file=f, force_terminal=False, width=160).print(table)
 
-    # ---------- plots -----------------------------------------------------
+    # ---------- Графики: подписи оставляем на английском -------------------
     _plot_grouped_bar(
         summaries, metric="mean_tokens", ylabel="Mean tokens / task",
         title="E1 — Token cost by architecture × context",
@@ -283,7 +271,7 @@ def _suite_labels(suite: str) -> list[str]:
         return ["humaneval", "controlled"]
     if suite in {"humaneval", "controlled"}:
         return [suite]
-    raise ValueError("suite must be one of: humaneval, controlled, both")
+    raise ValueError("suite должен быть одним из: humaneval, controlled, both")
 
 
 def _load_suite(suite: str, *, n: int, context_target_tokens: int):
@@ -291,7 +279,7 @@ def _load_suite(suite: str, *, n: int, context_target_tokens: int):
         return load_humaneval(n=n, context_target_tokens=context_target_tokens, seed=42)
     if suite == "controlled":
         return build_controlled_context_suite(n=n, context_target_tokens=context_target_tokens, seed=42)
-    raise ValueError(f"unknown suite: {suite}")
+    raise ValueError(f"неизвестный suite: {suite}")
 
 
 def _plot_grouped_bar(
@@ -376,11 +364,11 @@ def _context_juggling_summary(results: list[RunResult]) -> dict[str, dict]:
 
 
 def _handoff_events(r: RunResult) -> int:
-    """Approximate context juggling count.
+    """Оценка числа context juggling events.
 
-    Each LLM call with non-zero input is a context injection. Classical-MAS has
-    multiple role calls, while Hybrid-INoT usually has a single combined call.
-    CTRL has zero.
+    Каждый LLM-вызов с ненулевым input считается отдельной передачей контекста.
+    У Classical-MAS таких передач несколько, потому что роли вызываются
+    отдельно; у Hybrid-INoT обычно один объединённый вызов; у CTRL их нет.
     """
     return sum(1 for u in r.usages if u.input_tokens > 0)
 

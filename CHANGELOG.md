@@ -2,6 +2,9 @@
 
 ## 0.3.0 — окружение, ключи и RUB-учёт
 
+- Markdown-документация `docs/e1.md`–`docs/e5.md` переведена на русский.
+- Текстовый вывод E1 и пояснения в активном экспериментальном модуле
+  переведены на русский; подписи графиков сохранены на английском.
 - Добавлены Windows-скрипты:
   - `scripts/setup_windows.ps1` создаёт `.venv`, ставит пакет и готовит `.env`;
   - `scripts/inot.ps1` запускает CLI через проектный Python.
@@ -25,7 +28,7 @@
 ## 0.2.0 — усиление научной постановки
 
 - Добавлен контрольный baseline `CTRL_NoAssistant`.
-- Добавлен controlled-context benchmark для H1.
+- Добавлен controlled-context бенчмарк для H1.
 - Команда E1 получила параметр `--suite humaneval|controlled|both`.
 - Добавлен deterministic tool-latency harness для H3:
   serial Hybrid-style execution против parallel Classical-MAS-style execution.

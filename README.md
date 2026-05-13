@@ -130,7 +130,7 @@ llm:
 - `fig_pass_at_1_by_context.png` — `pass@1` в процентах;
 - `fig_cumulative_errors.png` — накопление ошибок по мере запуска;
 - `fig_context_transfer_tokens.png` — сколько input/context токенов передано в LLM-вызовы;
-- `fig_context_juggling_events.png` — как часто архитектура перекидывает контекст между role/model calls.
+- `fig_context_juggling_events.png` — как часто архитектура перекидывает контекст между ролевыми/model-вызовами.
 
 На основных графиках по длине контекста красная пунктирная линия показывает
 порог H1 из `experiments.h1_context_threshold_tokens`.
@@ -172,7 +172,7 @@ llm:
 
 ## Основные команды
 
-Smoke test без денег и без сети:
+Проверка без денег и без сети:
 
 ```powershell
 python -m inot check
@@ -195,7 +195,7 @@ H1 на HumanEval:
 python -m inot e1 --n 20 --seeds "42,123" --suite humaneval
 ```
 
-H1 на кастомном controlled-context benchmark:
+H1 на кастомном controlled-context бенчмарке:
 
 ```powershell
 python -m inot e1 --n 20 --seeds "42,123" --suite controlled
