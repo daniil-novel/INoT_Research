@@ -13,6 +13,8 @@ results/*
 !results/.gitkeep
 !results/e6/
 !results/e6/**
+!results/slide_e2e3_real/
+!results/slide_e2e3_real/**
 data/humaneval.jsonl
 data/cache/
 build/
