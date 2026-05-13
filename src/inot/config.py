@@ -14,7 +14,7 @@ from typing import Any
 import yaml
 
 
-def _load_dotenv(path: Path) -> None:
+def _load_dotenv(path: Path, *, override: bool = True) -> None:
     if not path.exists():
         return
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -24,7 +24,7 @@ def _load_dotenv(path: Path) -> None:
         k, _, v = line.partition("=")
         k = k.strip()
         v = v.strip().strip('"').strip("'")
-        if k and k not in os.environ:
+        if k and (override or k not in os.environ):
             os.environ[k] = v
 
 
@@ -66,7 +66,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def load_config(path: str | Path | None = None) -> Config:
     """Load ``config.yaml`` (or override path), apply ``.env``, return Config."""
-    _load_dotenv(_PROJECT_ROOT / ".env")
+    # Для воспроизводимых локальных экспериментов файл проекта `.env` должен
+    # иметь приоритет над случайно выставленной системной переменной.
+    _load_dotenv(_PROJECT_ROOT / ".env", override=True)
     cfg_path = Path(path) if path else (_PROJECT_ROOT / "config.yaml")
     with cfg_path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}

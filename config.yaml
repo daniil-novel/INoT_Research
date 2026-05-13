@@ -23,7 +23,7 @@ llm:
   max_retries: 4
   temperature: 0.2
   # Budget guard: hard cap in USD per single experiment run; raises if exceeded.
-  hard_budget_usd: 50.0
+  hard_budget_usd: 10.0
 
 accounting:
   # Fixed conversion rate for reproducible reports. Update manually before
