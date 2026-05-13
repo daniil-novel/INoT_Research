@@ -9,14 +9,16 @@ llm:
   api_key_env: OPENROUTER_API_KEY
   # The "large" and "small" models referenced in the article (rL, rS).
   # Defaults chosen as common cheap+strong combo. Override freely.
-  large_model: openai/gpt-4o-2024-11-20
-  small_model: openai/gpt-4o-mini-2024-07-18
+  large_model: google/gemini-3.1-pro-preview
+  small_model: google/gemini-3.1-flash-lite
   # OpenRouter prices ($ per 1M tokens) snapshot. Update via `--prices-file`.
   prices_usd_per_mtok:
     openai/gpt-4o-2024-11-20:        {input: 2.50, output: 10.00}
     openai/gpt-4o-mini-2024-07-18:   {input: 0.15, output: 0.60}
     anthropic/claude-3.5-sonnet:     {input: 3.00, output: 15.00}
     anthropic/claude-3-haiku:        {input: 0.25, output: 1.25}
+    google/gemini-3.1-pro-preview:   {input: 2.00, output: 12.00}
+    google/gemini-3.1-flash-lite:    {input: 0.25, output: 1.50}
   request_timeout_seconds: 120
   max_retries: 4
   temperature: 0.2
@@ -69,5 +71,6 @@ experiments:
   e4_swebench_n: 50
   e5_total_n: 500
   e5_extrapolate_to: 10000
+  e6_context_lengths: [512, 2048, 8192]
   delta_H1: 0.15
   pass_at_1_tolerance_pp: 2.0

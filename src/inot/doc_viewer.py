@@ -39,7 +39,7 @@ def render_experiment(name: str, results_dir: Path) -> None:
         console.print(f"[yellow]No docs/{name}.md found; skipping description.[/yellow]")
 
     # 2) verdict (if any)
-    for verdict_file in ("H1_VERDICT.md", "H2_VERDICT.md"):
+    for verdict_file in ("H1_VERDICT.md", "H2_VERDICT.md", "E6_VERDICT.md"):
         v = exp_dir / verdict_file
         if v.exists():
             console.print(Panel(Markdown(v.read_text(encoding="utf-8")),

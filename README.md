@@ -30,6 +30,7 @@
 | H3 | при независимых параллельных tool-вызовах преимущество Hybrid-INoT по latency исчезает | `src/inot/experiments/e2_ablation.py`, `src/inot/tools/synthetic.py` | `results/e2/e2c/summary.json` |
 | τ* | пороговая длина контекста, где Hybrid-INoT начинает выигрывать по `U_tok` | `src/inot/experiments/e3_context_scaling.py` | `results/e3/tau_star.json` |
 | TCO | экстраполяция полной стоимости владения и чувствительность к ценам | `src/inot/experiments/e5_tco.py` | `results/e5/tco_summary.json` |
+| E6 | насколько `gemini-3.1-flash-lite` хуже/дешевле `gemini-3.1-pro-preview` на B2 и B3 | `src/inot/experiments/e6_model_sweep.py` | `results/e6/E6_VERDICT.md` |
 
 Статистика: парный критерий Вилкоксона, McNemar для `pass/fail`, bootstrap CI
 95% с 10 000 ресэмплирований, поправка Холма-Бонферрони.
@@ -213,6 +214,13 @@ python -m inot e1 --n 20 --seeds "42,123" --suite both
 python -m inot all --n 30 --seeds "42,123,456"
 ```
 
+Сравнение Gemini Pro и Gemini Flash-Lite:
+
+```powershell
+python -m inot e6 --n 20 --seeds "42,123" --suite controlled
+python -m inot view e6
+```
+
 Просмотр результатов в терминале:
 
 ```powershell
@@ -221,6 +229,7 @@ python -m inot view e2
 python -m inot view e3
 python -m inot view e4
 python -m inot view e5
+python -m inot view e6
 ```
 
 ## Структура проекта

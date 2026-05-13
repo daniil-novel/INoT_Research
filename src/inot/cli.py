@@ -152,6 +152,20 @@ def e5(
     _run(load_config(config), n=n, seeds=_parse_seeds(seeds), out_dir=output, dry_run=dry_run)
 
 
+@app.command()
+def e6(
+    n: int = typer.Option(20),
+    seeds: str = typer.Option("42,123"),
+    suite: str = typer.Option("controlled", help="humaneval | controlled | both"),
+    config: Path = typer.Option(project_root() / "config.yaml"),
+    output: Path = typer.Option(project_root() / "results" / "e6"),
+    dry_run: bool = typer.Option(False),
+):
+    """E6 — Gemini Pro vs Flash-Lite inside B2 and B3."""
+    from .experiments.e6_model_sweep import run as _run
+    _run(load_config(config), n=n, seeds=_parse_seeds(seeds), out_dir=output, dry_run=dry_run, suite=suite)
+
+
 @app.command(name="all")
 def run_all(
     n: int = typer.Option(20),
